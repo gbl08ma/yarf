@@ -4,7 +4,10 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -101,6 +104,34 @@ func (c *Context) QueryValue(name string) string {
 	return c.Request.URL.Query().Get(name)
 }
 
+func parseIPPort(s string) (ip net.IP, port, space string, err error) {
+	ip = net.ParseIP(s)
+	if ip == nil {
+		var host string
+		host, port, err = net.SplitHostPort(s)
+		if err != nil {
+			return
+		}
+		if port != "" {
+			// This check only makes sense if service names are not allowed
+			if _, err = strconv.ParseUint(port, 10, 16); err != nil {
+				return
+			}
+		}
+		ip = net.ParseIP(host)
+	}
+	if ip == nil {
+		err = errors.New("invalid address format")
+	} else {
+		space = "IPv6"
+		if ip4 := ip.To4(); ip4 != nil {
+			space = "IPv4"
+			ip = ip4
+		}
+	}
+	return
+}
+
 // GetClientIP retrieves the client IP address from the request information.
 // It detects common proxy headers to return the actual client's IP and not the proxy's.
 func (c *Context) GetClientIP() (ip string) {
@@ -135,7 +166,11 @@ func (c *Context) GetClientIP() (ip string) {
 		ip = c.Request.RemoteAddr
 	}
 
-	return strings.Split(ip, ":")[0]
+	netIP, _, _, err := parseIPPort(ip)
+	if err != nil {
+		return ip
+	}
+	return netIP.String()
 }
 
 // Redirect sends the corresponding HTTP redirect response with the provided URL and status code.
